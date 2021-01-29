@@ -8,7 +8,7 @@ export const EXTERNAL_SUFFIX = '?commonjs-external';
 export const EXPORTS_SUFFIX = '?commonjs-exports';
 export const MODULE_SUFFIX = '?commonjs-module';
 
-export const DYNAMIC_REGISTER_PREFIX = '\0commonjs-dynamic-register:';
+export const DYNAMIC_REGISTER_SUFFIX = '?commonjs-dynamic-register';
 export const DYNAMIC_JSON_PREFIX = '\0commonjs-dynamic-json:';
 export const DYNAMIC_PACKAGES_ID = '\0commonjs-dynamic-packages';
 
@@ -157,6 +157,9 @@ export function commonjsResolveImpl (path, originalModuleDir, testCache) {
 	const shouldTryNodeModules = isPossibleNodeModulesPath(path);
 	path = normalize(path);
 	let relPath;
+	if (path[0] === '/') {
+		originalModuleDir = '/';
+	}
 	while (true) {
 		if (!shouldTryNodeModules) {
 			relPath = originalModuleDir ? normalize(originalModuleDir + '/' + path) : path;
@@ -167,7 +170,7 @@ export function commonjsResolveImpl (path, originalModuleDir, testCache) {
 		}
 
 		if (relPath.endsWith('/..')) {
-      break; // Travelled too far up, avoid infinite loop
+			break; // Travelled too far up, avoid infinite loop
 		}
 
 		for (let extensionIndex = 0; extensionIndex < CHECKED_EXTENSIONS.length; extensionIndex++) {
@@ -190,7 +193,7 @@ export function commonjsResolveImpl (path, originalModuleDir, testCache) {
 export function commonjsResolve (path, originalModuleDir) {
 	const resolvedPath = commonjsResolveImpl(path, originalModuleDir);
 	if (resolvedPath !== null) {
-	  return resolvedPath;
+		return resolvedPath;
 	}
 	return require.resolve(path);
 }

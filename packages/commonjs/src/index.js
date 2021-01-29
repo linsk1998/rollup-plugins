@@ -10,12 +10,13 @@ import analyzeTopLevelStatements from './analyze-top-level-statements';
 import {
   getDynamicPackagesEntryIntro,
   getDynamicPackagesModule,
-  isModuleRegistrationProxy
+  isDynamicModuleImport
 } from './dynamic-packages-manager';
 import getDynamicRequirePaths from './dynamic-require-paths';
 import {
   DYNAMIC_JSON_PREFIX,
   DYNAMIC_PACKAGES_ID,
+  DYNAMIC_REGISTER_SUFFIX,
   EXPORTS_SUFFIX,
   EXTERNAL_SUFFIX,
   getHelpersModule,
@@ -122,7 +123,11 @@ export default function commonjs(options = {}) {
     }
 
     // avoid wrapping as this is a commonjsRegister call
-    const disableWrap = isModuleRegistrationProxy(id, dynamicRequireModuleSet);
+    const disableWrap = isWrappedId(id, DYNAMIC_REGISTER_SUFFIX);
+    if (disableWrap) {
+      // eslint-disable-next-line no-param-reassign
+      id = unwrapId(id, DYNAMIC_REGISTER_SUFFIX);
+    }
 
     return transformCommonjs(
       this.parse,
@@ -213,8 +218,15 @@ export default function commonjs(options = {}) {
         return getDynamicJsonProxy(id, commonDir);
       }
 
-      if (isModuleRegistrationProxy(id, dynamicRequireModuleSet)) {
-        return getDynamicRequireProxy(normalizePathSlashes(id), commonDir);
+      if (isDynamicModuleImport(id, dynamicRequireModuleSet)) {
+        return `export default require(${JSON.stringify(normalizePathSlashes(id))});`;
+      }
+
+      if (isWrappedId(id, DYNAMIC_REGISTER_SUFFIX)) {
+        return getDynamicRequireProxy(
+          normalizePathSlashes(unwrapId(id, DYNAMIC_REGISTER_SUFFIX)),
+          commonDir
+        );
       }
 
       if (isWrappedId(id, PROXY_SUFFIX)) {
@@ -230,7 +242,13 @@ export default function commonjs(options = {}) {
       return null;
     },
 
-    transform(code, id) {
+    transform(code, rawId) {
+      let id = rawId;
+
+      if (isWrappedId(id, DYNAMIC_REGISTER_SUFFIX)) {
+        id = unwrapId(id, DYNAMIC_REGISTER_SUFFIX);
+      }
+
       const extName = extname(id);
       if (
         extName !== '.cjs' &&
@@ -242,7 +260,7 @@ export default function commonjs(options = {}) {
       }
 
       try {
-        return transformAndCheckExports.call(this, code, id);
+        return transformAndCheckExports.call(this, code, rawId);
       } catch (err) {
         return this.error(err, err.loc);
       }

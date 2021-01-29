@@ -11,6 +11,7 @@ import {
   isDefineCompiledEsm,
   isFalsy,
   isReference,
+  isShorthandProperty,
   isTruthy,
   KEY_COMPILED_ESM
 } from './ast-utils';
@@ -25,7 +26,13 @@ import {
   isRequireStatement,
   isStaticRequireStatement
 } from './generate-imports';
-import { DYNAMIC_JSON_PREFIX, DYNAMIC_REGISTER_PREFIX } from './helpers';
+import {
+  DYNAMIC_JSON_PREFIX,
+  DYNAMIC_REGISTER_SUFFIX,
+  isWrappedId,
+  unwrapId,
+  wrapId
+} from './helpers';
 import { tryParse } from './parse';
 import {
   deconflict,
@@ -229,13 +236,13 @@ export default function transformCommonjs(
             }
 
             let sourceId = getRequireStringArg(node);
-            const isDynamicRegister = sourceId.startsWith(DYNAMIC_REGISTER_PREFIX);
+            const isDynamicRegister = isWrappedId(sourceId, DYNAMIC_REGISTER_SUFFIX);
             if (isDynamicRegister) {
-              sourceId = sourceId.substr(DYNAMIC_REGISTER_PREFIX.length);
+              sourceId = unwrapId(sourceId, DYNAMIC_REGISTER_SUFFIX);
               if (sourceId.endsWith('.json')) {
                 sourceId = DYNAMIC_JSON_PREFIX + sourceId;
               }
-              dynamicRegisterSources.add(sourceId);
+              dynamicRegisterSources.add(wrapId(sourceId, DYNAMIC_REGISTER_SUFFIX));
             } else {
               if (
                 !sourceId.endsWith('.json') &&
@@ -324,10 +331,13 @@ export default function transformCommonjs(
                   )}`
                 );
               }
-
-              magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsRequire`, {
-                storeName: true
-              });
+              if (isShorthandProperty(parent)) {
+                magicString.appendRight(node.end, `: ${HELPERS_NAME}.commonjsRequire`);
+              } else {
+                magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsRequire`, {
+                  storeName: true
+                });
+              }
               usesDynamicRequire = true;
               return;
             case 'module':
