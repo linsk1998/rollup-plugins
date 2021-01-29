@@ -2,7 +2,7 @@
 
 import { dirname } from 'path';
 
-import { attachScopes, extractAssignedNames, makeLegalIdentifier } from '@rollup/pluginutils';
+import { attachScopes, extractAssignedNames } from '@rollup/pluginutils';
 import { walk } from 'estree-walker';
 import MagicString from 'magic-string';
 
@@ -38,13 +38,6 @@ const exportsPattern = /^(?:module\.)?exports(?:\.([a-zA-Z_$][a-zA-Z_$0-9]*))?$/
 
 const functionType = /^(?:FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/;
 
-// TODO Lukas
-//  do not forget: If we lose track of exports, both __esModule and a default export may be defined
-
-// TODO Lukas
-//  in the export names PR: Also note if a module may be compiled ESM and forward this if a require
-//  is assigned to module.exports
-
 export default function transformCommonjs(
   parse,
   code,
@@ -68,7 +61,7 @@ export default function transformCommonjs(
     global: false,
     require: false
   };
-  let usesCommonjsHelpers = false;
+  let usesDynamicRequire = false;
   const virtualDynamicRequirePath =
     isDynamicRequireModulesEnabled && getVirtualPathForDynamicRequirePath(dirname(id), commonDir);
   let scope = attachScopes(ast, 'scope');
@@ -81,7 +74,6 @@ export default function transformCommonjs(
 
   // TODO technically wrong since globals isn't populated yet, but ¯\_(ツ)_/¯
   const HELPERS_NAME = deconflict(scope, globals, 'commonjsHelpers');
-  const namedExports = {};
   const dynamicRegisterSources = new Set();
   let hasRemovedRequire = false;
 
@@ -172,19 +164,6 @@ export default function transformCommonjs(
             }
 
             skippedNodes.add(node.left);
-
-            // TODO Lukas this actually has no effect unless we start tracking named exports again
-            //  to generate named exports for entry points
-            if (flattened.keypath === 'module.exports' && node.right.type === 'ObjectExpression') {
-              for (const prop of node.right.properties) {
-                if (prop.computed || !('key' in prop) || prop.key.type !== 'Identifier') return;
-                const { name } = prop.key;
-                if (name === makeLegalIdentifier(name)) namedExports[name] = true;
-              }
-              return;
-            }
-
-            if (exportsPatternMatch[1]) namedExports[exportsPatternMatch[1]] = true;
           } else {
             for (const name of extractAssignedNames(node.left)) {
               reassignedNames.add(name);
@@ -224,7 +203,6 @@ export default function transformCommonjs(
                 storeName: true
               }
             );
-            usesCommonjsHelpers = true;
             return;
           }
 
@@ -275,7 +253,7 @@ export default function transformCommonjs(
                       dirname(id) === '.' ? null /* default behavior */ : virtualDynamicRequirePath
                     )})`
                   );
-                  usesCommonjsHelpers = true;
+                  usesDynamicRequire = true;
                 }
                 return;
               }
@@ -332,7 +310,6 @@ export default function transformCommonjs(
                     magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsRequire`, {
                       storeName: true
                     });
-                    usesCommonjsHelpers = true;
                   }
                 }
 
@@ -351,7 +328,7 @@ export default function transformCommonjs(
               magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsRequire`, {
                 storeName: true
               });
-              usesCommonjsHelpers = true;
+              usesDynamicRequire = true;
               return;
             case 'module':
             case 'exports':
@@ -364,7 +341,6 @@ export default function transformCommonjs(
                 magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsGlobal`, {
                   storeName: true
                 });
-                usesCommonjsHelpers = true;
               }
               return;
             case 'define':
@@ -382,7 +358,6 @@ export default function transformCommonjs(
             magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsRequire`, {
               storeName: true
             });
-            usesCommonjsHelpers = true;
             skippedNodes.add(node.object);
             skippedNodes.add(node.property);
           }
@@ -401,7 +376,6 @@ export default function transformCommonjs(
               magicString.overwrite(node.start, node.end, `${HELPERS_NAME}.commonjsGlobal`, {
                 storeName: true
               });
-              usesCommonjsHelpers = true;
             }
           }
           return;
@@ -454,7 +428,6 @@ export default function transformCommonjs(
   const detectWrappedDefault =
     shouldWrap &&
     (topLevelDefineCompiledEsmExpressions.length > 0 || code.indexOf('__esModule') >= 0);
-  usesCommonjsHelpers = usesCommonjsHelpers || detectWrappedDefault;
 
   if (
     !(
@@ -463,8 +436,7 @@ export default function transformCommonjs(
       uses.module ||
       uses.exports ||
       uses.require ||
-      // TODO Lukas can we get rid of this here and everywhere?
-      usesCommonjsHelpers ||
+      usesDynamicRequire ||
       hasRemovedRequire
     ) &&
     (ignoreGlobal || !uses.global)
@@ -531,11 +503,6 @@ export default function transformCommonjs(
     .trim()
     .prepend(leadingComment + importBlock)
     .append(exportBlock);
-
-  // TODO Lukas remove
-  console.log('<===', id);
-  console.log(magicString.toString());
-  console.log();
 
   return {
     code: magicString.toString(),
